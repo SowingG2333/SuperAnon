@@ -9,13 +9,13 @@ python src/train_anonymizer.py \
     --output_dir "model/anonymizer" \
     --privacy_weight 1.0 \
     --utility_weight 1.0 \
-    --learning_rate 1e-5 \
-    --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 8 \
+    --learning_rate 2e-5 \
+    --per_device_train_batch_size 4 \
+    --gradient_accumulation_steps 2 \
     --gradient_checkpointing \
-    --num_generations 4 \
-    --max_prompt_length 512 \
-    --max_completion_length 1024 \
+    --num_generations 8 \
+    --max_prompt_length 384 \
+    --max_completion_length 384 \
     --num_train_epochs 1 \
     --max_steps 500 \
     --logging_steps 1 \

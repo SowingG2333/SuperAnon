@@ -28,7 +28,7 @@ class UtilityRewardModel:
         # 2. 计算余弦相似度
         scores = F.cosine_similarity(embeddings_orig, embeddings_anon, dim=1)
 
-        # 3. 非线性缩放 (相似度0.9->0.72, 0.6->0.21)
+        # 3. 非线性缩放
         scaled_scores = torch.pow(scores, 3)
         
         return scaled_scores.to(self.device)
