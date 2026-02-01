@@ -1,6 +1,6 @@
 import torch
 import random
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 # Prompt模板
 SYS_PROMPT = "You are a privacy investigator. Extract the specific attribute from the text."
@@ -18,7 +18,7 @@ def disable_thinking_mode(tokenizer):
 
 class UniversalAttacker:
     """通用隐私攻击者模型，用于计算隐私奖励""" 
-    def __init__(self, model_path, device="cuda"):
+    def __init__(self, model_path, device="cuda", use_4bit=True):
         print(f"[Attacker] Loading Universal Attacker from {model_path}...")
         self.device = device
         
@@ -29,11 +29,23 @@ class UniversalAttacker:
         self.tokenizer.padding_side = "right"
         disable_thinking_mode(self.tokenizer)
 
-        # 2. 加载模型
+        # 2. 配置4-bit量化（节省显存）
+        bnb_config = None
+        if use_4bit:
+            print("[Attacker] Applying 4-bit quantization...")
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+
+        # 3. 加载模型
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            device_map=device,
-            dtype=torch.bfloat16,
+            quantization_config=bnb_config,
+            torch_dtype=torch.bfloat16 if bnb_config is None else None,  # 非量化时使用bf16
+            device_map="auto",
             trust_remote_code=True,
             attn_implementation="flash_attention_2" if torch.cuda.is_bf16_supported() else "eager"
         ).eval()

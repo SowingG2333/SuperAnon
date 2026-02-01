@@ -54,7 +54,11 @@ class ScriptArguments:
     )
     use_4bit: bool = field(
         default=True,
-        metadata={"help": "是否使用4-bit量化 (QLoRA)"}
+        metadata={"help": "Anonymizer是否使用4-bit量化"}
+    )
+    attacker_use_4bit: bool = field(
+        default=True,
+        metadata={"help": "Attacker是否使用4-bit量化"}
     )
 
 def main():
@@ -67,7 +71,11 @@ def main():
 
     # 2. 加载奖励模型
     print("Loading Reward Models...")
-    attacker = UniversalAttacker(script_args.attacker_model_path, device="cuda")
+    attacker = UniversalAttacker(
+        script_args.attacker_model_path, 
+        device="cuda",
+        use_4bit=script_args.attacker_use_4bit
+    )
     utility_model = UtilityRewardModel(script_args.utility_model_path, device="cuda")
 
     # 3. 定义复合奖励函数
@@ -136,7 +144,8 @@ def main():
         quantization_config=bnb_config,
         trust_remote_code=True,
         device_map="auto",            
-        attn_implementation="flash_attention_2" if torch.cuda.is_bf16_supported() else "eager",    )
+        attn_implementation="flash_attention_2" if torch.cuda.is_bf16_supported() else "eager"
+    )
 
     # 准备量化训练所需的特殊层
     if script_args.use_4bit:
