@@ -1,7 +1,14 @@
+import torch
+import os
 from dataclasses import dataclass, field
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, HfArgumentParser
-from peft import LoraConfig
+from transformers import (
+    AutoTokenizer, 
+    AutoModelForCausalLM, 
+    HfArgumentParser, 
+    BitsAndBytesConfig
+)
+from peft import LoraConfig, prepare_model_for_kbit_training
 from trl import GRPOTrainer, GRPOConfig
 from datasets import load_dataset
 
@@ -18,7 +25,6 @@ def parse_think_content(text):
     if "</think>" in text:
         return text.split("</think>")[-1].strip()
     return text.strip()
-
 
 @dataclass
 class ScriptArguments:
@@ -46,6 +52,10 @@ class ScriptArguments:
         default=1.0,
         metadata={"help": "效用奖励权重"}
     )
+    use_4bit: bool = field(
+        default=True,
+        metadata={"help": "是否使用4-bit量化 (QLoRA)"}
+    )
 
 def main():
     # 1. 解析参数
@@ -62,22 +72,15 @@ def main():
 
     # 3. 定义复合奖励函数
     def composite_reward_func(prompts, completions, original_text, profiles, **kwargs):
-        """计算总奖励 = 隐私奖励 + 效用奖励"""
-        # 解析掉<think>块，只保留实际输出
         clean_completions = [parse_think_content(c) for c in completions]
-        
-        # 隐私奖励: Attacker Loss越大 -> 隐私保护越好
         privacy_scores = attacker.compute_privacy_reward(clean_completions, profiles)
-        
-        # 效用奖励: 与原文的语义相似度 0~1
         utility_scores = utility_model.compute_score(original_text, clean_completions)
         
-        # 加权融合
         final_rewards = (script_args.privacy_weight * privacy_scores) + \
                        (script_args.utility_weight * utility_scores)
         return final_rewards
 
-    # 4. 加载tokenizer (保持enable_thinking=True，使用默认行为)
+    # 4. 加载tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         script_args.model_name_or_path, 
         trust_remote_code=True
@@ -88,19 +91,15 @@ def main():
 
     # 5. 数据处理函数
     def process_data(sample):
-        """构造Chat格式输入，Profile只传给Reward Model"""
         text = sample['text']
         profile = sample['profile']
-        
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": f"Anonymize this text:\n{text}"}
         ]
-        # enable_thinking=True (默认), 开启thinking mode
         prompt_str = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True, enable_thinking=True
         )
-        
         return {
             "prompt": prompt_str,
             "profile": profile,
@@ -110,9 +109,8 @@ def main():
     # 6. 加载并处理数据
     dataset = load_dataset("json", data_files=script_args.train_file, split="train")
     dataset = dataset.map(process_data, remove_columns=dataset.column_names)
-    print(f"Processed {len(dataset)} samples.")
 
-    # 7. 配置LoRA
+    # 7. 配置 LoRA
     peft_config = LoraConfig(
         r=16,
         lora_alpha=32,
@@ -122,9 +120,35 @@ def main():
         task_type="CAUSAL_LM",
     )
 
-    # 8. 配置Trainer
+    # 8. 配置4-bit量化并加载模型
+    bnb_config = None
+    if script_args.use_4bit:
+        print("Applying 4-bit quantization (QLoRA)...")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
+            bnb_4bit_use_double_quant=True,
+        )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        script_args.model_name_or_path,
+        quantization_config=bnb_config,
+        trust_remote_code=True,
+        device_map="auto",            
+        attn_implementation="flash_attention_2" if torch.cuda.is_bf16_supported() else "eager",    )
+
+    # 准备量化训练所需的特殊层
+    if script_args.use_4bit:
+        model = prepare_model_for_kbit_training(model) # gradient checkpointing handled by Trainer or manually if needed
+
+    # Enable gradient checkpointing if requested
+    if training_args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
+
+    # 9. 配置Trainer
     trainer = GRPOTrainer(
-        model=script_args.model_name_or_path,
+        model=model,
         reward_funcs=composite_reward_func,
         args=training_args,
         train_dataset=dataset,
@@ -132,14 +156,17 @@ def main():
         processing_class=tokenizer,
     )
 
-    # 9. 开始训练
+    # 10. 开始训练
     print("Starting GRPO Training...")
     trainer.train()
     
-    # 10. 保存模型
-    trainer.save_model(training_args.output_dir)
-    tokenizer.save_pretrained(training_args.output_dir)
-    print(f"Model saved to {training_args.output_dir}")
+    # 11. 保存模型
+    print("Training Done!")
+    if trainer.is_world_process_zero():
+        os.makedirs(training_args.output_dir, exist_ok=True)
+        trainer.save_model(training_args.output_dir)
+        tokenizer.save_pretrained(training_args.output_dir)
+        print(f"Model saved to {training_args.output_dir}")
 
 if __name__ == "__main__":
     main()

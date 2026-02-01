@@ -33,7 +33,7 @@ class UniversalAttacker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path,
             device_map=device,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             trust_remote_code=True,
             attn_implementation="flash_attention_2" if torch.cuda.is_bf16_supported() else "eager"
         ).eval()

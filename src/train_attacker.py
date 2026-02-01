@@ -95,8 +95,8 @@ def main():
 
     # 9. 保存模型
     print("Training Done!")
-    trainer.save_model(script_args.output_dir)
-    tokenizer.save_pretrained(script_args.output_dir)
+    trainer.save_model(training_args.output_dir)
+    tokenizer.save_pretrained(training_args.output_dir)
     
 if __name__ == "__main__":
     main()

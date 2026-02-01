@@ -2,16 +2,17 @@
 
 # 训练Anonymizer模型
 python src/train_anonymizer.py \
-    --model_name_or_path "Qwen/Qwen3-1.7B" \
-    --attacker_model_path "model/checkpoint-268" \
-    --utility_model_path "BAAI/bge-m3" \
+    --model_name_or_path "/root/autodl-tmp/hf_cache/hub/models--Qwen--Qwen3-8B/snapshots/b968826d9c46dd6066d109eabc6255188de91218" \
+    --attacker_model_path "model/attacker/checkpoint-402" \
+    --utility_model_path "/root/autodl-tmp/hf_cache/hub/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181" \
     --train_file "data/train.jsonl" \
     --output_dir "model/anonymizer" \
     --privacy_weight 1.0 \
     --utility_weight 1.0 \
     --learning_rate 1e-5 \
     --per_device_train_batch_size 1 \
-    --gradient_accumulation_steps 4 \
+    --gradient_accumulation_steps 8 \
+    --gradient_checkpointing \
     --num_generations 4 \
     --max_prompt_length 512 \
     --max_completion_length 1024 \
